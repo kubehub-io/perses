@@ -14,7 +14,11 @@
 package auth
 
 import (
+	"bytes"
+	"fmt"
+	"regexp"
 	"strings"
+	"text/template"
 
 	"github.com/perses/perses/pkg/model/api/config"
 	v1 "github.com/perses/perses/pkg/model/api/v1"
@@ -46,6 +50,26 @@ type externalUserInfo interface {
 
 func buildLoginFromEmail(email string) string {
 	return strings.Split(email, "@")[0]
+}
+
+var invalidClaimChars = regexp.MustCompile(`[^a-zA-Z0-9_.\-]`)
+
+// renderLoginTemplate executes a Go template string with the provided data,
+// sanitizing all values to remove potentially dangerous characters.
+func renderLoginTemplate(tmplStr string, data map[string]any) (string, error) {
+	sanitized := make(map[string]string, len(data))
+	for k, v := range data {
+		sanitized[k] = invalidClaimChars.ReplaceAllString(fmt.Sprint(v), "-")
+	}
+	tmpl, err := template.New("login").Parse(tmplStr)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, sanitized); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(buf.String()), nil
 }
 
 // extractPersistedClaims reads the configured claim names from rawClaims and returns

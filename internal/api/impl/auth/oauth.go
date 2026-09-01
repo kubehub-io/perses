@@ -94,8 +94,18 @@ type oauthUserInfo struct {
 
 func (u *oauthUserInfo) getProperty(keys []string) string {
 	for _, key := range keys {
+		if strings.Contains(key, "{{") {
+			result, err := renderLoginTemplate(key, u.RawProperties)
+			if err != nil {
+				logrus.WithError(err).Warn("Failed to render login template")
+				continue
+			}
+			if result != "" {
+				return result
+			}
+			continue
+		}
 		if value, ok := u.RawProperties[key]; ok {
-			// Ensure it is a string. This makes sure for example that an int is well transformed into a string
 			return fmt.Sprint(value)
 		}
 	}

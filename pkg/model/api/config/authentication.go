@@ -194,12 +194,13 @@ type OIDCLogout struct {
 }
 
 type OIDCProvider struct {
-	Provider     `json:",inline" yaml:",inline"`
-	Issuer       common.URL        `json:"issuer" yaml:"issuer"`
-	DiscoveryURL common.URL        `json:"discovery_url,omitempty" yaml:"discovery_url,omitempty"`
-	URLParams    map[string]string `json:"url_params,omitempty" yaml:"url_params,omitempty"`
-	DisablePKCE  bool              `json:"disable_pkce" yaml:"disable_pkce"`
-	Logout       OIDCLogout        `json:"logout" yaml:"logout"`
+	Provider             `json:",inline" yaml:",inline"`
+	Issuer               common.URL        `json:"issuer" yaml:"issuer"`
+	DiscoveryURL         common.URL        `json:"discovery_url,omitempty" yaml:"discovery_url,omitempty"`
+	URLParams            map[string]string `json:"url_params,omitempty" yaml:"url_params,omitempty"`
+	DisablePKCE          bool              `json:"disable_pkce" yaml:"disable_pkce"`
+	CustomLoginProperty  string            `json:"custom_login_property,omitempty" yaml:"custom_login_property,omitempty"`
+	Logout               OIDCLogout        `json:"logout" yaml:"logout"`
 }
 
 func (p *OIDCProvider) Verify() error {

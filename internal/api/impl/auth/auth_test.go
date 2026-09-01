@@ -103,3 +103,78 @@ func TestOAuthRetrieveDeviceAccessToken_UsesProviderHTTPClient(t *testing.T) {
 	assert.Equal(t, "urn:ietf:params:oauth:grant-type:device_code", gotGrantType)
 	assert.Equal(t, deviceCode, gotDeviceCode)
 }
+
+func TestGetProperty_PlainKey(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"login": "alice", "email": "alice@example.com"},
+		loginKeys:     []string{"login"},
+	}
+	assert.Equal(t, "alice", u.getProperty([]string{"login"}))
+}
+
+func TestGetProperty_PlainKeyNotFound(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"email": "alice@example.com"},
+		loginKeys:     []string{"login"},
+	}
+	assert.Equal(t, "", u.getProperty([]string{"login"}))
+}
+
+func TestGetProperty_SimpleTemplate(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"sub": "u123", "email": "alice@example.com"},
+		loginKeys:     []string{"{{.sub}}"},
+	}
+	assert.Equal(t, "u123", u.getProperty([]string{"{{.sub}}"}))
+}
+
+func TestGetProperty_CompoundTemplate(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"sub": "u123", "email": "alice@example.com"},
+		loginKeys:     []string{"{{.sub}}-{{.email}}"},
+	}
+	// '@' in email is sanitized to '-'
+	assert.Equal(t, "u123-alice-example.com", u.getProperty([]string{"{{.sub}}-{{.email}}"}))
+}
+
+func TestGetProperty_TemplateWithInvalidChars(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"sub": "u123", "email": "alice@corp.com"},
+		loginKeys:     []string{"{{.sub}}-{{.email}}"},
+	}
+	// '@' in email should be replaced with '-'
+	assert.Equal(t, "u123-alice-corp.com", u.getProperty([]string{"{{.sub}}-{{.email}}"}))
+}
+
+func TestGetProperty_MalformedTemplate(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"sub": "u123"},
+		loginKeys:     []string{"{{.invalid"},
+	}
+	// Malformed template should fall through; no match means empty string
+	assert.Equal(t, "", u.getProperty([]string{"{{.invalid"}))
+}
+
+func TestGetProperty_TemplateMissingKey(t *testing.T) {
+	u := &oauthUserInfo{
+		RawProperties: map[string]any{"sub": "u123"},
+		loginKeys:     []string{"{{.missing}}"},
+	}
+	// Go templates render missing map keys as "<no value>"
+	assert.Equal(t, "<no value>", u.getProperty([]string{"{{.missing}}"}))
+}
+
+func TestRenderLoginTemplate(t *testing.T) {
+	data := map[string]any{"sub": "u123", "org": "acme-corp"}
+	result, err := renderLoginTemplate("{{.sub}}@{{.org}}", data)
+	require.NoError(t, err)
+	assert.Equal(t, "u123@acme-corp", result)
+}
+
+func TestRenderLoginTemplate_SpecialChars(t *testing.T) {
+	data := map[string]any{"sub": "u 123", "org": "acme&corp"}
+	result, err := renderLoginTemplate("{{.sub}}-{{.org}}", data)
+	require.NoError(t, err)
+	// spaces and '&' replaced with '-'
+	assert.Equal(t, "u-123-acme-corp", result)
+}

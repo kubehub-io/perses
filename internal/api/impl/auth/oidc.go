@@ -43,7 +43,9 @@ import (
 // oidcUserInfo implements externalUserInfo for the OIDC providers
 type oidcUserInfo struct {
 	externalUserInfoProfile
-	Subject string `json:"sub,omitempty"`
+	Subject             string         `json:"sub,omitempty"`
+	RawClaims           map[string]any `json:"-"`
+	CustomLoginProperty string         `json:"-"`
 	// issuer is not supposed to be taken from json, but instead it must be set right before the db sync.
 	issuer string
 }
@@ -54,8 +56,16 @@ func (u *oidcUserInfo) GetSubject() string {
 }
 
 // GetLogin implements [externalUserInfo]
-// It uses the first part of the email to create the username.
+// If CustomLoginProperty is set, it uses the template to generate the login from raw claims.
+// Otherwise, it uses the first part of the email to create the username.
 func (u *oidcUserInfo) GetLogin() string {
+	if u.CustomLoginProperty != "" && len(u.RawClaims) > 0 {
+		login, err := renderLoginTemplate(u.CustomLoginProperty, u.RawClaims)
+		if err == nil && login != "" {
+			return login
+		}
+		// Fallback to default behavior on error
+	}
 	login := buildLoginFromEmail(u.Email)
 	if len(login) > 0 {
 		return login
@@ -153,6 +163,7 @@ type oIDCEndpoint struct {
 	issuer                 string
 	svc                    service
 	claimConfigs           []config.ProviderClaimConfig
+	customLoginProperty    string
 	extraLogoutHandler     echo.HandlerFunc
 	apiPrefix              string
 }
@@ -221,6 +232,7 @@ func newOIDCEndpoint(provider config.OIDCProvider, jwt crypto.JWT, dao user.DAO,
 		issuer:                 provider.Issuer.String(),
 		svc:                    service{dao: dao, authz: authz},
 		claimConfigs:           provider.Claims,
+		customLoginProperty:    provider.CustomLoginProperty,
 		extraLogoutHandler:     extraLogoutHandler,
 		apiPrefix:              apiPrefix,
 	}, nil
@@ -292,6 +304,10 @@ func (e *oIDCEndpoint) codeExchange(ctx echo.Context) error {
 			rawClaims = tokens.IDTokenClaims.Claims
 		}
 		persistedClaims := extractPersistedClaims(rawClaims, e.claimConfigs)
+
+		// Set raw claims and custom login property on the user info
+		info.RawClaims = rawClaims
+		info.CustomLoginProperty = e.customLoginProperty
 
 		if _, err := e.performUserSync(info, persistedClaims, setCookie); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -372,6 +388,9 @@ func (e *oIDCEndpoint) token(ctx echo.Context) error {
 			rawClaims = idClaims.Claims
 		}
 		persistedClaims = extractPersistedClaims(rawClaims, e.claimConfigs)
+		// Set raw claims and custom login property on the user info
+		uInfo.RawClaims = rawClaims
+		uInfo.CustomLoginProperty = e.customLoginProperty
 	case api.GrantTypeClientCredentials:
 		// Extract client_id and client_secret from Authorization header
 		clientID, clientSecret, ok := ctx.Request().BasicAuth()
@@ -386,13 +405,19 @@ func (e *oIDCEndpoint) token(ctx echo.Context) error {
 			return err
 		}
 		var accessClaims oidc.AccessTokenClaims
+		var rawClaims map[string]any
 		if _, parseErr := oidc.ParseToken(token.AccessToken, &accessClaims); parseErr != nil {
 			e.logWithError(parseErr).Warn("Failed to parse client credentials access token; proceeding without claims")
 		} else {
-			persistedClaims = extractPersistedClaims(accessClaims.Claims, e.claimConfigs)
+			rawClaims = accessClaims.Claims
+			persistedClaims = extractPersistedClaims(rawClaims, e.claimConfigs)
 		}
 		//TODO: Probably not a good idea to use the client id as the subject, but what can we do with client credentials?
-		uInfo = &oidcUserInfo{Subject: clientID}
+		uInfo = &oidcUserInfo{
+			Subject:             clientID,
+			RawClaims:           rawClaims,
+			CustomLoginProperty: e.customLoginProperty,
+		}
 	default:
 		return oidc.ErrUnsupportedGrantType()
 	}
