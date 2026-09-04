@@ -257,7 +257,24 @@ func (n *native) GetUserProjects(ctx echo.Context, requestAction v1Role.Action, 
 
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
-	return projectsWithPermission(n.cache.permissions[username], requestAction, requestScope), nil
+	// Merge wildcard user permissions with user-specific permissions.
+	var mergedPermissions map[string][]*v1Role.Permission
+	if wcPermissions, ok := n.cache.permissions[v1.WildcardUser]; ok {
+		mergedPermissions = make(map[string][]*v1Role.Permission, len(wcPermissions))
+		for project, perms := range wcPermissions {
+			mergedPermissions[project] = append(mergedPermissions[project], perms...)
+		}
+	}
+	if userPermissions, ok := n.cache.permissions[username]; ok {
+		if mergedPermissions == nil {
+			mergedPermissions = userPermissions
+		} else {
+			for project, perms := range userPermissions {
+				mergedPermissions[project] = append(mergedPermissions[project], perms...)
+			}
+		}
+	}
+	return projectsWithPermission(mergedPermissions, requestAction, requestScope), nil
 }
 
 func (n *native) HasPermission(ctx echo.Context, requestAction v1Role.Action, requestProject string, requestScope v1Role.Scope) bool {
@@ -325,6 +342,10 @@ func (n *native) GetPermissions(ctx echo.Context) (map[string][]*v1Role.Permissi
 	}
 	userPermissions := make(map[string][]*v1Role.Permission)
 	userPermissions[v1.WildcardProject] = n.guestPermissions
+	// Merge wildcard user permissions first, then user-specific permissions.
+	for project, projectPermissions := range n.cache.permissions[v1.WildcardUser] {
+		userPermissions[project] = append(userPermissions[project], projectPermissions...)
+	}
 	for project, projectPermissions := range n.cache.permissions[username] {
 		userPermissions[project] = append(userPermissions[project], projectPermissions...)
 	}

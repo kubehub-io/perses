@@ -42,8 +42,26 @@ type cache struct {
 }
 
 func (c *cache) hasPermission(user string, requestAction v1Role.Action, requestProject string, requestScope v1Role.Scope) bool {
-	usrPermissions, ok := c.permissions[user]
-	if !ok {
+	// Check wildcard user permissions first, then merge with user-specific permissions.
+	var usrPermissions map[string][]*v1Role.Permission
+	if wcPermissions, ok := c.permissions[v1.WildcardUser]; ok {
+		usrPermissions = wcPermissions
+	}
+	if userPermissions, ok := c.permissions[user]; ok {
+		if usrPermissions == nil {
+			usrPermissions = userPermissions
+		} else {
+			merged := make(map[string][]*v1Role.Permission, len(usrPermissions))
+			for project, perms := range usrPermissions {
+				merged[project] = append(merged[project], perms...)
+			}
+			for project, perms := range userPermissions {
+				merged[project] = append(merged[project], perms...)
+			}
+			usrPermissions = merged
+		}
+	}
+	if usrPermissions == nil {
 		return false
 	}
 
